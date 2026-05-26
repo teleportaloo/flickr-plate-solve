@@ -1,0 +1,1 @@
+flickr-oauth @ git+https://github.com/teleportaloo/flickr-oauth.git

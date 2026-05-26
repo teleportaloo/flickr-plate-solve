@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flickr-plate-solve"
+version = "1.0.0"
+description = "Plate-solve Flickr astrophotography images using astrometry.net and annotate with notes and machine tags"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.8"
+authors = [
+    {name = "Andy Wallace", email = "andrew.wallace@pobox.com"},
+]
+keywords = ["flickr", "astrometry", "plate-solving", "astrophotography", "astronomy"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Astronomy",
+    "Topic :: Multimedia :: Graphics",
+]
+dependencies = [
+    "flickr-oauth @ git+https://github.com/teleportaloo/flickr-oauth.git",
+]
+
+[project.urls]
+Homepage = "https://github.com/teleportaloo/flickr-plate-solve"
+Repository = "https://github.com/teleportaloo/flickr-plate-solve"
+
+[project.scripts]
+flickr-plate-solve = "plate_solve:main"
