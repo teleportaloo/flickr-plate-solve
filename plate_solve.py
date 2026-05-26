@@ -17,6 +17,7 @@ Usage:
     python3 plate_solve.py --dry-run https://flic.kr/p/2seqonc
     python3 plate_solve.py --job 15931178 https://flic.kr/p/2seqonc
     python3 plate_solve.py --clear-notes --job 15931178 https://flic.kr/p/2seqonc
+    python3 plate_solve.py --redo https://flic.kr/p/2seqonc
 
 Requires:
     - Flickr API keys with write permission
