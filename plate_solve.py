@@ -433,6 +433,19 @@ _SIMBAD_OTYPES = {
     'rG': 'Radio Galaxy', 'X': 'X-ray Source',
     'gam': 'Gamma-ray Source', 'Psr': 'Pulsar',
     'No*': 'Nova', 'SN*': 'Supernova', 'Su*': 'Supergiant',
+    'HighPM*': 'High Proper Motion Star',
+    'Seyfert2': 'Seyfert 2 Galaxy', 'Seyfert1': 'Seyfert 1 Galaxy',
+    'Seyfert_2': 'Seyfert 2 Galaxy', 'Seyfert_1': 'Seyfert 1 Galaxy',
+    'C*': 'Carbon Star', 'S*': 'S Star', 'OH*': 'OH/IR Star',
+    'TT*': 'T Tauri Star', 'Ae*': 'Herbig Ae/Be Star',
+    'Or*': 'Orion Variable', 'FU*': 'FU Ori Variable',
+    'RS*': 'RS CVn Variable', 'BY*': 'BY Dra Variable',
+    'a2*': 'Alpha2 CVn Variable', 'El*': 'Ellipsoidal Variable',
+    'blu': 'Blue Object', 'err': 'Not an Object',
+    'IR': 'Infrared Source', 'UV': 'UV Source',
+    'Neb': 'Nebula', 'CGb': 'Cometary Globule',
+    'mul': 'Composite Object', 'reg': 'Region',
+    'SCG': 'Supercluster of Galaxies', 'vid': 'Void',
 }
 
 
@@ -441,7 +454,7 @@ def _friendly_otype(otype):
     if not otype:
         return None
     otype = otype.strip()
-    return _SIMBAD_OTYPES.get(otype, otype if len(otype) > 3 else None)
+    return _SIMBAD_OTYPES.get(otype, otype)
 
 
 def simbad_lookup(object_name, verbose=True):
@@ -510,11 +523,14 @@ def simbad_lookup(object_name, verbose=True):
                 except ValueError:
                     pass
 
+            # Normalise whitespace in all identifiers (SIMBAD has "M  81" etc.)
+            ids = [' '.join(n.split()) for n in ids]
+
             # Prefer common names (NAME xxx)
             named = [n.replace('NAME ', '') for n in ids if n.startswith('NAME ')]
             # Fall back to Messier number
-            messier = [n.strip() for n in ids
-                       if n.strip().startswith('M ') and len(n.strip()) < 7]
+            messier = [n for n in ids
+                       if n.startswith('M ') and len(n) < 7]
 
             # Combine: all common names + any Messier not already covered
             names = list(named)
