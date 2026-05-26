@@ -645,16 +645,46 @@ def add_repo_comment(flickr, photo_id, dry_run=False):
 
 
 def get_image_dimensions(flickr, photo_id):
-    """Get the Original and Medium (500px) image dimensions."""
+    """Get the Original and Medium (500px) image dimensions.
+
+    Falls back to the largest available size if Original is restricted,
+    and to Medium 640 or Small if Medium 500 is unavailable.
+    """
     resp = flickr.photos.getSizes(photo_id=photo_id)
     sizes = resp.findall('.//size')
     original = None
     medium = None
+    largest = None
+    largest_pixels = 0
+
     for s in sizes:
-        if s.get('label') == 'Original':
-            original = (int(s.get('width')), int(s.get('height')))
-        elif s.get('label') == 'Medium':
-            medium = (int(s.get('width')), int(s.get('height')))
+        label = s.get('label', '')
+        w, h = int(s.get('width')), int(s.get('height'))
+
+        if label == 'Original':
+            original = (w, h)
+        elif label == 'Medium':
+            medium = (w, h)
+
+        # Track the largest available size as fallback
+        pixels = w * h
+        if pixels > largest_pixels:
+            largest_pixels = pixels
+            largest = (w, h)
+
+    # Fall back to largest available if Original is restricted
+    if not original:
+        original = largest
+
+    # Fall back for Medium: try Medium 640, then use smallest reasonable size
+    if not medium:
+        for s in sizes:
+            if s.get('label') in ('Medium 640', 'Small', 'Small 320'):
+                medium = (int(s.get('width')), int(s.get('height')))
+                break
+        if not medium and largest:
+            medium = largest
+
     return original, medium
 
 
