@@ -20,7 +20,7 @@ import re
 import argparse
 import subprocess
 
-from plate_solve import load_flickr_api
+from plate_solve import load_flickr_api, get_job_from_comments
 
 
 def get_album_id(arg):
@@ -34,25 +34,6 @@ def get_album_id(arg):
         return arg.strip()
     print(f"Could not extract album ID from: {arg}", file=sys.stderr)
     sys.exit(1)
-
-
-def get_job_from_comments(flickr, photo_id):
-    """Check a photo's comments for an astrometry.net job link.
-
-    Returns the job ID (int) if found, or None.
-    """
-    try:
-        resp = flickr.oauth.call_method('flickr.photos.comments.getList',
-                                        photo_id=photo_id)
-        comments = resp.findall('.//comment')
-        for comment in comments:
-            text = comment.text or ''
-            m = re.search(r'nova\.astrometry\.net/annotated_display/(\d+)', text)
-            if m:
-                return int(m.group(1))
-    except Exception as e:
-        print(f"    Error reading comments: {e}")
-    return None
 
 
 def main():

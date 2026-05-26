@@ -597,6 +597,25 @@ def clear_notes(flickr, photo_id, dry_run=False):
     print("Notes cleared.")
 
 
+def get_job_from_comments(flickr, photo_id):
+    """Check a photo's comments for an astrometry.net job link.
+
+    Returns the job ID (int) if found, or None.
+    """
+    try:
+        resp = flickr.oauth.call_method('flickr.photos.comments.getList',
+                                        photo_id=photo_id)
+        comments = resp.findall('.//comment')
+        for comment in comments:
+            text = comment.text or ''
+            m = re.search(r'nova\.astrometry\.net/annotated_display/(\d+)', text)
+            if m:
+                return int(m.group(1))
+    except Exception as e:
+        print(f"  Error reading comments: {e}")
+    return None
+
+
 def get_image_dimensions(flickr, photo_id):
     """Get the Original and Medium (500px) image dimensions."""
     resp = flickr.photos.getSizes(photo_id=photo_id)
@@ -880,11 +899,28 @@ def main():
                         help='Solve but don\'t write anything to Flickr')
     parser.add_argument('--job', type=int, metavar='JOB_ID',
                         help='Reuse a previous astrometry.net job instead of re-solving')
+    parser.add_argument('--redo', action='store_true',
+                        help='Re-do notes only: read job from existing comment, '
+                             'clear old notes, skip comment and tags')
     args = parser.parse_args()
+
+    if args.redo:
+        args.clear_notes = True
+        args.no_comment = True
+        args.no_tag = True
 
     # Get Flickr photo ID
     photo_id = get_photo_id(args.photo)
     flickr = load_flickr_api()
+
+    if args.redo and not args.job:
+        # Look up job ID from existing plate-solve comment
+        print(f"Flickr photo {photo_id}, looking for existing solve...")
+        job_id = get_job_from_comments(flickr, photo_id)
+        if not job_id:
+            print("No plate-solve comment found — nothing to redo.", file=sys.stderr)
+            sys.exit(1)
+        args.job = job_id
 
     if args.job:
         # Reuse a previous astrometry.net job
