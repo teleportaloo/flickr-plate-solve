@@ -14,12 +14,18 @@ Plate-solve Flickr astrophotography images using [astrometry.net](https://nova.a
 ## Installation
 
 ```bash
+mkdir PlateSolve && cd PlateSolve
+python3 -m venv venv
+source venv/bin/activate
 pip install git+https://github.com/teleportaloo/flickr-plate-solve.git
 ```
 
-Or clone and install in development mode:
+Or clone and install in development mode (edits to `plate_solve.py` take effect immediately):
 
 ```bash
+mkdir PlateSolve && cd PlateSolve
+python3 -m venv venv
+source venv/bin/activate
 git clone https://github.com/teleportaloo/flickr-plate-solve.git
 cd flickr-plate-solve
 pip install -e .
