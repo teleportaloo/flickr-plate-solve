@@ -42,7 +42,8 @@ def get_job_from_comments(flickr, photo_id):
     Returns the job ID (int) if found, or None.
     """
     try:
-        resp = flickr.photos.comments.getList(photo_id=photo_id)
+        resp = flickr.oauth.call_method('flickr.photos.comments.getList',
+                                        photo_id=photo_id)
         comments = resp.findall('.//comment')
         for comment in comments:
             text = comment.text or ''
@@ -97,6 +98,7 @@ def main():
             sys.executable, 'plate_solve.py',
             '--clear-notes',
             '--no-comment',  # always skip comment — it already exists
+            '--no-tag',      # always skip tags — they already exist
             '--job', str(job_id),
             photo_id,
         ]

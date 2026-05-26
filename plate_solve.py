@@ -395,18 +395,70 @@ def add_comment(flickr, photo_id, comment_text, dry_run=False):
 
 # --- SIMBAD name resolution ---
 
-def simbad_lookup(object_name, verbose=True):
-    """Look up common names for an astronomical object via SIMBAD.
+# SIMBAD object type abbreviations → friendly names
+_SIMBAD_OTYPES = {
+    'G': 'Galaxy', 'GiC': 'Galaxy in Cluster', 'GiG': 'Galaxy in Group',
+    'GiP': 'Galaxy in Pair', 'BiC': 'Brightest Galaxy in Cluster',
+    'IG': 'Interacting Galaxy', 'PaG': 'Pair of Galaxies',
+    'GrG': 'Group of Galaxies', 'ClG': 'Galaxy Cluster',
+    'AGN': 'Active Galaxy', 'SyG': 'Seyfert Galaxy',
+    'Sy1': 'Seyfert 1 Galaxy', 'Sy2': 'Seyfert 2 Galaxy',
+    'LIN': 'LINER Galaxy', 'SBG': 'Starburst Galaxy',
+    'bCG': 'Blue Compact Galaxy', 'EmG': 'Emission-line Galaxy',
+    'LSB': 'Low Surface Brightness Galaxy', 'HII': 'HII Region',
+    'PN': 'Planetary Nebula', 'RNe': 'Reflection Nebula',
+    'SNR': 'Supernova Remnant', 'SR?': 'Supernova Remnant Candidate',
+    'ISM': 'Interstellar Medium', 'DNe': 'Dark Nebula',
+    'EmO': 'Emission Object', 'Cld': 'Cloud',
+    'GNe': 'Galactic Nebula', 'BNe': 'Bright Nebula',
+    'MoC': 'Molecular Cloud', 'HVC': 'High-velocity Cloud',
+    'SFR': 'Star Forming Region',
+    'GlC': 'Globular Cluster', 'OpC': 'Open Cluster',
+    'Cl*': 'Star Cluster', 'As*': 'Stellar Association',
+    'St*': 'Stellar Stream', 'MGr': 'Moving Group',
+    '*': 'Star', '**': 'Double Star', '*iC': 'Star in Cluster',
+    '*iN': 'Star in Nebula', '*iA': 'Star in Association',
+    'V*': 'Variable Star', 'Ce*': 'Cepheid', 'RR*': 'RR Lyrae',
+    'Mi*': 'Mira Variable', 'Pu*': 'Pulsating Star',
+    'Ec*': 'Eclipsing Binary', 'SB*': 'Spectroscopic Binary',
+    'WD*': 'White Dwarf', 'NS*': 'Neutron Star', 'BH*': 'Black Hole',
+    'WR*': 'Wolf-Rayet Star', 'Be*': 'Be Star',
+    'RG*': 'Red Giant', 'SG*': 'Supergiant',
+    'HB*': 'Horizontal Branch Star', 'HS*': 'Hot Subdwarf',
+    'LP*': 'Long-period Variable', 'PM*': 'High Proper Motion Star',
+    'QSO': 'Quasar', 'BLL': 'BL Lac', 'Bla': 'Blazar',
+    'Rad': 'Radio Source', 'mR': 'Metric Radio Source',
+    'cm': 'cm Radio Source', 'mm': 'mm Radio Source',
+    'smm': 'sub-mm Source', 'HI': 'HI Source',
+    'rG': 'Radio Galaxy', 'X': 'X-ray Source',
+    'gam': 'Gamma-ray Source', 'Psr': 'Pulsar',
+    'No*': 'Nova', 'SN*': 'Supernova', 'Su*': 'Supergiant',
+}
 
-    Returns a list of human-friendly names (common names and Messier numbers),
-    or an empty list if no better names exist.
+
+def _friendly_otype(otype):
+    """Convert SIMBAD object type code to a friendly name."""
+    if not otype:
+        return None
+    otype = otype.strip()
+    return _SIMBAD_OTYPES.get(otype, otype if len(otype) > 3 else None)
+
+
+def simbad_lookup(object_name, verbose=True):
+    """Look up common names, magnitude, and type for an astronomical object.
+
+    Returns a dict with:
+      'names': list of human-friendly names (common names and Messier numbers)
+      'mag': visual magnitude (float) or None
+      'type': friendly object type string or None
     """
+    result = {'names': [], 'mag': None, 'type': None}
     try:
         import xml.etree.ElementTree as ET
         query = urllib.parse.urlencode({
             'Ident': object_name,
             'output.format': 'votable',
-            'output.params': 'main_id,ids',
+            'output.params': 'main_id,ids,otype,flux(V)',
         })
         url = f"{SIMBAD_URL}?{query}"
         with urllib.request.urlopen(url, timeout=5) as resp:
@@ -414,19 +466,49 @@ def simbad_lookup(object_name, verbose=True):
 
         root = ET.fromstring(data)
         ns = {'v': 'http://www.ivoa.net/xml/VOTable/v1.2'}
+
+        # Figure out which column is which from FIELD definitions
+        fields = root.findall('.//v:FIELD', ns)
+        col_map = {}
+        for i, f in enumerate(fields):
+            name = f.get('name', '').upper()
+            if 'IDS' in name:
+                col_map['ids'] = i
+            elif name == 'OTYPE':
+                col_map['otype'] = i
+            elif 'FLUX' in name or name == 'FLUX_V':
+                col_map['flux'] = i
+
         rows = root.findall('.//v:TR', ns)
         if not rows:
             if verbose:
                 print(f"    {object_name}: not found in SIMBAD")
-            return []
+            return result
 
         for tr in rows:
             tds = tr.findall('v:TD', ns)
-            if len(tds) < 2 or not tds[1].text:
+
+            # Parse identifiers
+            ids_idx = col_map.get('ids', 1)
+            if ids_idx < len(tds) and tds[ids_idx].text:
+                ids = [n.strip() for n in tds[ids_idx].text.split('|')]
+            else:
                 if verbose:
                     print(f"    {object_name}: no identifiers in SIMBAD")
                 continue
-            ids = [n.strip() for n in tds[1].text.split('|')]
+
+            # Parse object type
+            otype_idx = col_map.get('otype')
+            if otype_idx is not None and otype_idx < len(tds) and tds[otype_idx].text:
+                result['type'] = _friendly_otype(tds[otype_idx].text)
+
+            # Parse visual magnitude
+            flux_idx = col_map.get('flux')
+            if flux_idx is not None and flux_idx < len(tds) and tds[flux_idx].text:
+                try:
+                    result['mag'] = float(tds[flux_idx].text)
+                except ValueError:
+                    pass
 
             # Prefer common names (NAME xxx)
             named = [n.replace('NAME ', '') for n in ids if n.startswith('NAME ')]
@@ -435,23 +517,30 @@ def simbad_lookup(object_name, verbose=True):
                        if n.strip().startswith('M ') and len(n.strip()) < 7]
 
             # Combine: all common names + any Messier not already covered
-            result = list(named)
+            names = list(named)
             for m in messier:
-                if m not in result:
-                    result.append(m)
+                if m not in names:
+                    names.append(m)
+            result['names'] = names
 
             if verbose:
                 name_entries = [n for n in ids if n.startswith('NAME ')]
-                if result:
-                    print(f"    {object_name} -> {result}  (from: {name_entries})")
+                extras = []
+                if result['type']:
+                    extras.append(result['type'])
+                if result['mag'] is not None:
+                    extras.append(f"mag {result['mag']:.1f}")
+                extra_str = f"  [{', '.join(extras)}]" if extras else ""
+                if names:
+                    print(f"    {object_name} -> {names}{extra_str}  (from: {name_entries})")
                 else:
-                    print(f"    {object_name}: no common name  ({len(ids)} ids, none are NAME or Messier)")
+                    print(f"    {object_name}: no common name  ({len(ids)} ids){extra_str}")
 
             return result
     except Exception as e:
         if verbose:
             print(f"    {object_name}: SIMBAD error ({e})")
-    return []
+    return result
 
 
 # --- Flickr notes ---
@@ -589,15 +678,19 @@ def add_notes(flickr, photo_id, job_id, orig_w, orig_h, medium_w, medium_h, dry_
         tier_summary = ', '.join(f'{v} {k}' for k, v in kept_tiers.items())
         print(f"  {len(objects)} annotations, keeping top {MAX_NOTES} ({tier_summary}), skipped {skipped}")
 
-    # Look up common names via SIMBAD (only for the filtered set)
+    # Look up common names, type, and magnitude via SIMBAD
     if filtered:
         print("  Looking up object names via SIMBAD...")
         for a in filtered:
             if a.get("names"):
-                nice_names = simbad_lookup(a["names"][0])
-                for name in nice_names:
+                info = simbad_lookup(a["names"][0])
+                for name in info['names']:
                     if name not in a["names"]:
                         a["names"].append(name)
+                if info['mag'] is not None:
+                    a['_mag'] = info['mag']
+                if info['type']:
+                    a['_type'] = info['type']
 
     if not filtered:
         print("\nNo notable objects to annotate.")
@@ -614,14 +707,29 @@ def add_notes(flickr, photo_id, job_id, orig_w, orig_h, medium_w, medium_h, dry_
     if dry_run:
         print(f"\n[DRY RUN] Would add {len(filtered)} notes to photo {photo_id}:")
         for a in filtered:
-            label = a["names"][0] if a.get("names") else "Unknown"
-            print(f"  {label}")
+            parts = [", ".join(a.get("names", ["Unknown"]))]
+            extras = []
+            if a.get('_type'):
+                extras.append(a['_type'])
+            if a.get('_mag') is not None:
+                extras.append(f"mag {a['_mag']:.1f}")
+            if extras:
+                parts.append(f"({', '.join(extras)})")
+            print(f"  {' '.join(parts)}")
         return
 
     print(f"\nAdding {len(filtered)} annotations...")
     added = 0
     for a in filtered:
-        label = ", ".join(a.get("names", ["Unknown"]))
+        parts = [", ".join(a.get("names", ["Unknown"]))]
+        extras = []
+        if a.get('_type'):
+            extras.append(a['_type'])
+        if a.get('_mag') is not None:
+            extras.append(f"mag {a['_mag']:.1f}")
+        if extras:
+            parts.append(f"({', '.join(extras)})")
+        label = " ".join(parts)
         px = a.get("pixelx", 0)
         py = a.get("pixely", 0)
         radius = a.get("radius", 0)
