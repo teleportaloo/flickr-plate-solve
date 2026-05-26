@@ -479,7 +479,7 @@ def simbad_lookup(object_name, verbose=True):
         query = urllib.parse.urlencode({
             'Ident': object_name,
             'output.format': 'votable',
-            'output.params': 'main_id,ids,otype,flux(V)',
+            'output.params': 'main_id,ids,otype,flux(V),flux(B),flux(G)',
         })
         url = f"{SIMBAD_URL}?{query}"
         with urllib.request.urlopen(url, timeout=5) as resp:
@@ -497,8 +497,12 @@ def simbad_lookup(object_name, verbose=True):
                 col_map['ids'] = i
             elif name == 'OTYPE':
                 col_map['otype'] = i
-            elif 'FLUX' in name or name == 'FLUX_V':
-                col_map['flux'] = i
+            elif name == 'FLUX_V' or name == 'FLUX(V)':
+                col_map['flux_v'] = i
+            elif name == 'FLUX_B' or name == 'FLUX(B)':
+                col_map['flux_b'] = i
+            elif name == 'FLUX_G' or name == 'FLUX(G)':
+                col_map['flux_g'] = i
 
         rows = root.findall('.//v:TR', ns)
         if not rows:
@@ -523,13 +527,15 @@ def simbad_lookup(object_name, verbose=True):
             if otype_idx is not None and otype_idx < len(tds) and tds[otype_idx].text:
                 result['type'] = _friendly_otype(tds[otype_idx].text)
 
-            # Parse visual magnitude
-            flux_idx = col_map.get('flux')
-            if flux_idx is not None and flux_idx < len(tds) and tds[flux_idx].text:
-                try:
-                    result['mag'] = float(tds[flux_idx].text)
-                except ValueError:
-                    pass
+            # Parse magnitude: prefer V-band, fall back to B, then Gaia G
+            for flux_key in ('flux_v', 'flux_b', 'flux_g'):
+                flux_idx = col_map.get(flux_key)
+                if flux_idx is not None and flux_idx < len(tds) and tds[flux_idx].text:
+                    try:
+                        result['mag'] = float(tds[flux_idx].text)
+                        break
+                    except ValueError:
+                        continue
 
             # Normalise whitespace in all identifiers (SIMBAD has "M  81" etc.)
             ids = [' '.join(n.split()) for n in ids]
