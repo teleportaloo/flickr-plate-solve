@@ -396,10 +396,10 @@ def add_comment(flickr, photo_id, comment_text, dry_run=False):
 # --- SIMBAD name resolution ---
 
 def simbad_lookup(object_name, verbose=True):
-    """Look up a common name for an astronomical object via SIMBAD.
+    """Look up common names for an astronomical object via SIMBAD.
 
-    Returns the best human-friendly name (common name or Messier number),
-    or None if no better name exists.
+    Returns a list of human-friendly names (common names and Messier numbers),
+    or an empty list if no better names exist.
     """
     try:
         import xml.etree.ElementTree as ET
@@ -418,7 +418,7 @@ def simbad_lookup(object_name, verbose=True):
         if not rows:
             if verbose:
                 print(f"    {object_name}: not found in SIMBAD")
-            return None
+            return []
 
         for tr in rows:
             tds = tr.findall('v:TD', ns)
@@ -428,29 +428,30 @@ def simbad_lookup(object_name, verbose=True):
                 continue
             ids = [n.strip() for n in tds[1].text.split('|')]
 
-            # Prefer a common name (NAME xxx)
+            # Prefer common names (NAME xxx)
             named = [n.replace('NAME ', '') for n in ids if n.startswith('NAME ')]
             # Fall back to Messier number
             messier = [n.strip() for n in ids
                        if n.strip().startswith('M ') and len(n.strip()) < 7]
 
+            # Combine: all common names + any Messier not already covered
+            result = list(named)
+            for m in messier:
+                if m not in result:
+                    result.append(m)
+
             if verbose:
                 name_entries = [n for n in ids if n.startswith('NAME ')]
-                if named:
-                    print(f"    {object_name} -> {named[0]}  (from: {name_entries})")
-                elif messier:
-                    print(f"    {object_name} -> {messier[0]}  (no NAME, has Messier)")
+                if result:
+                    print(f"    {object_name} -> {result}  (from: {name_entries})")
                 else:
                     print(f"    {object_name}: no common name  ({len(ids)} ids, none are NAME or Messier)")
 
-            if named:
-                return named[0]
-            if messier:
-                return messier[0]
+            return result
     except Exception as e:
         if verbose:
             print(f"    {object_name}: SIMBAD error ({e})")
-    return None
+    return []
 
 
 # --- Flickr notes ---
@@ -593,9 +594,10 @@ def add_notes(flickr, photo_id, job_id, orig_w, orig_h, medium_w, medium_h, dry_
         print("  Looking up object names via SIMBAD...")
         for a in filtered:
             if a.get("names"):
-                nice_name = simbad_lookup(a["names"][0])
-                if nice_name and nice_name not in a["names"]:
-                    a["names"].append(nice_name)
+                nice_names = simbad_lookup(a["names"][0])
+                for name in nice_names:
+                    if name not in a["names"]:
+                        a["names"].append(name)
 
     if not filtered:
         print("\nNo notable objects to annotate.")
