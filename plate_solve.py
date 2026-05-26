@@ -174,7 +174,7 @@ def astrometry_post(endpoint, data):
 def astrometry_get(endpoint):
     """GET from astrometry.net API."""
     url = f"{ASTROMETRY_BASE}/{endpoint}"
-    resp = urllib.request.urlopen(url)
+    resp = urllib.request.urlopen(url, timeout=30)
     return json.loads(resp.read())
 
 
