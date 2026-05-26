@@ -1,5 +1,7 @@
 {
-    "flickr_key": "YOUR_FLICKR_API_KEY",
-    "flickr_secret": "YOUR_FLICKR_API_SECRET",
+    "flickr_keys": {
+        "FLICKR_KEY": "YOUR_FLICKR_API_KEY",
+        "FLICKR_SECRET": "YOUR_FLICKR_API_SECRET"
+    },
     "astrometry_key": "YOUR_ASTROMETRY_NET_API_KEY"
 }
