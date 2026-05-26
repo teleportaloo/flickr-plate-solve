@@ -446,6 +446,14 @@ _SIMBAD_OTYPES = {
     'Neb': 'Nebula', 'CGb': 'Cometary Globule',
     'mul': 'Composite Object', 'reg': 'Region',
     'SCG': 'Supercluster of Galaxies', 'vid': 'Void',
+    'HIIReg': 'HII Region', 'GlobCluster': 'Globular Cluster',
+    'GtowardsCl': 'Galaxy towards Cluster', 'Radio': 'Radio Source',
+    'OpenCluster': 'Open Cluster', 'DkNeb': 'Dark Nebula',
+    'RfNeb': 'Reflection Nebula', 'EmNeb': 'Emission Nebula',
+    'PlNeb': 'Planetary Nebula', 'SNRem': 'Supernova Remnant',
+    'Nova': 'Nova', 'Supernova': 'Supernova',
+    'Galaxy': 'Galaxy', 'Nebula': 'Nebula',
+    'StarCluster': 'Star Cluster', 'Star': 'Star',
 }
 
 
