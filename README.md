@@ -102,6 +102,35 @@ If installed via pip, you can also use the console command:
 flickr-plate-solve https://www.flickr.com/photos/user/12345678
 ```
 
+## Album scripts
+
+### solve_album.py — plate-solve an entire album
+
+```bash
+# Solve all photos (skips already-solved and previously-failed)
+python3 solve_album.py https://www.flickr.com/photos/user/albums/72177720326735849/
+
+# Dry run — see what would be solved
+python3 solve_album.py --dry-run 72177720326735849
+
+# Force re-solve everything, even already-solved photos
+python3 solve_album.py --force 72177720326735849
+```
+
+Each solve can take up to 30 minutes, so expect this to run for a while! Photos tagged `astrometry:status=solved` or `astrometry:status=failed` are skipped unless `--force` is used.
+
+### retag_album.py — re-tag already-solved photos
+
+Re-does the notes on photos that have already been plate-solved (e.g. after updating the annotation format). Finds the existing astrometry.net job ID from the photo's comments, so no re-solving is needed.
+
+```bash
+# Re-tag all solved photos in an album
+python3 retag_album.py https://www.flickr.com/photos/user/albums/72177720326735849/
+
+# Dry run
+python3 retag_album.py --dry-run 72177720326735849
+```
+
 ## How it works
 
 - The script fetches the original image URL from the Flickr API and submits it to astrometry.net
@@ -115,8 +144,10 @@ flickr-plate-solve https://www.flickr.com/photos/user/12345678
 ## Features
 
 - Supports Flickr URLs, short links (`flic.kr`), guest pass URLs, and bare photo IDs
-- SIMBAD name resolution for common object names
+- SIMBAD name resolution for common names, object type, and visual magnitude
+- Notes show e.g. "NGC 3031, M 81, Bode's Galaxy (Galaxy, mag 6.9)"
 - Smart annotation filtering with priority tiers when notes exceed Flickr's 100-note limit
+- Album-level scripts for batch solving and retagging
 - Automatic retry on astrometry.net transient errors
 - 30-minute solve timeout with retry command printed on timeout
 - Tags failed solves with `astrometry:status=failed` so you know not to retry
