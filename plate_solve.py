@@ -989,6 +989,22 @@ def main():
     photo_id = get_photo_id(args.photo)
     flickr = load_flickr_api()
 
+    # Check what we're allowed to do with this photo
+    photo_info = flickr.oauth.call_method('flickr.photos.getInfo', photo_id=photo_id)
+    owner = photo_info.find('.//owner')
+    editability = photo_info.find('.//editability')
+    can_comment = editability is not None and editability.get('cancomment') == '1'
+    can_addmeta = editability is not None and editability.get('canaddmeta') == '1'
+    owner_name = owner.get('username', 'unknown') if owner is not None else 'unknown'
+
+    if not can_addmeta:
+        print(f"Note: photo owned by {owner_name} — tags and notes not permitted.")
+        args.no_tag = True
+        args.no_note = True
+    if not can_comment:
+        print(f"Note: comments not permitted on this photo.")
+        args.no_comment = True
+
     if args.redo and not args.job:
         # Look up job ID from existing plate-solve comment
         print(f"Flickr photo {photo_id}, looking for existing solve...")
