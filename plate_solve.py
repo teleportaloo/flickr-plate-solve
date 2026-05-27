@@ -478,21 +478,38 @@ def _friendly_otype(otype):
     return _SIMBAD_OTYPES.get(otype, otype)
 
 
+def _format_distance_ly(ly):
+    """Format a distance in light-years for display."""
+    if ly is None:
+        return None
+    if ly < 100:
+        return f"{ly:.1f} ly"
+    elif ly < 1000:
+        return f"{ly:.0f} ly"
+    elif ly < 1e6:
+        return f"{ly/1000:.1f} kly"
+    elif ly < 1e9:
+        return f"{ly/1e6:.1f} Mly"
+    else:
+        return f"{ly/1e9:.1f} Gly"
+
+
 def simbad_lookup(object_name, verbose=True):
-    """Look up common names, magnitude, and type for an astronomical object.
+    """Look up common names, magnitude, type, and distance for an astronomical object.
 
     Returns a dict with:
       'names': list of human-friendly names (common names and Messier numbers)
       'mag': visual magnitude (float) or None
       'type': friendly object type string or None
+      'distance': formatted distance string (e.g. "8.6 ly", "12.0 Mly") or None
     """
-    result = {'names': [], 'mag': None, 'type': None}
+    result = {'names': [], 'mag': None, 'type': None, 'distance': None}
     try:
         import xml.etree.ElementTree as ET
         query = urllib.parse.urlencode({
             'Ident': object_name,
             'output.format': 'votable',
-            'output.params': 'main_id,ids,otype,flux(V),flux(B),flux(G)',
+            'output.params': 'main_id,ids,otype,flux(V),flux(B),flux(G),distance,plx',
         })
         url = f"{SIMBAD_URL}?{query}"
         with urllib.request.urlopen(url, timeout=5) as resp:
@@ -516,6 +533,12 @@ def simbad_lookup(object_name, verbose=True):
                 col_map['flux_b'] = i
             elif name == 'FLUX_G' or name == 'FLUX(G)':
                 col_map['flux_g'] = i
+            elif 'DISTANCE' in name and 'distance' not in col_map:
+                col_map['distance'] = i
+            elif 'UNIT' in name:
+                col_map['dist_unit'] = i
+            elif name == 'PLX_VALUE':
+                col_map['plx'] = i
 
         rows = root.findall('.//v:TR', ns)
         if not rows:
@@ -550,6 +573,38 @@ def simbad_lookup(object_name, verbose=True):
                     except ValueError:
                         continue
 
+            # Parse distance: prefer SIMBAD distance field, fall back to parallax
+            dist_ly = None
+            dist_idx = col_map.get('distance')
+            unit_idx = col_map.get('dist_unit')
+            if dist_idx is not None and dist_idx < len(tds) and tds[dist_idx].text:
+                try:
+                    dist_val = float(tds[dist_idx].text)
+                    unit = ''
+                    if unit_idx is not None and unit_idx < len(tds) and tds[unit_idx].text:
+                        unit = tds[unit_idx].text.strip()
+                    # Convert to light-years
+                    if unit == 'pc':
+                        dist_ly = dist_val * 3.2616
+                    elif unit == 'kpc':
+                        dist_ly = dist_val * 3261.6
+                    elif unit == 'Mpc':
+                        dist_ly = dist_val * 3261600.0
+                except ValueError:
+                    pass
+            # Fall back to parallax (mas → light-years)
+            if dist_ly is None:
+                plx_idx = col_map.get('plx')
+                if plx_idx is not None and plx_idx < len(tds) and tds[plx_idx].text:
+                    try:
+                        plx_mas = float(tds[plx_idx].text)
+                        if plx_mas > 0:
+                            dist_ly = 3261.6 / plx_mas
+                    except ValueError:
+                        pass
+            if dist_ly is not None:
+                result['distance'] = _format_distance_ly(dist_ly)
+
             # Normalise whitespace in all identifiers (SIMBAD has "M  81" etc.)
             ids = [' '.join(n.split()) for n in ids]
 
@@ -573,6 +628,8 @@ def simbad_lookup(object_name, verbose=True):
                     extras.append(result['type'])
                 if result['mag'] is not None:
                     extras.append(f"mag {result['mag']:.1f}")
+                if result['distance']:
+                    extras.append(result['distance'])
                 extra_str = f"  [{', '.join(extras)}]" if extras else ""
                 if names:
                     print(f"    {object_name} -> {names}{extra_str}  (from: {name_entries})")
@@ -816,6 +873,8 @@ def add_notes(flickr, photo_id, job_id, orig_w, orig_h, medium_w, medium_h, dry_
                     a['_mag'] = info['mag']
                 if info['type']:
                     a['_type'] = info['type']
+                if info['distance']:
+                    a['_distance'] = info['distance']
 
     if not filtered:
         print("\nNo notable objects to annotate.")
@@ -838,6 +897,8 @@ def add_notes(flickr, photo_id, job_id, orig_w, orig_h, medium_w, medium_h, dry_
                 extras.append(a['_type'])
             if a.get('_mag') is not None:
                 extras.append(f"mag {a['_mag']:.1f}")
+            if a.get('_distance'):
+                extras.append(a['_distance'])
             if extras:
                 parts.append(f"({', '.join(extras)})")
             print(f"  {' '.join(parts)}")
@@ -852,6 +913,8 @@ def add_notes(flickr, photo_id, job_id, orig_w, orig_h, medium_w, medium_h, dry_
             extras.append(a['_type'])
         if a.get('_mag') is not None:
             extras.append(f"mag {a['_mag']:.1f}")
+        if a.get('_distance'):
+            extras.append(a['_distance'])
         if extras:
             parts.append(f"({', '.join(extras)})")
         label = " ".join(parts)
