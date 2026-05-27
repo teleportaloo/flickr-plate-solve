@@ -1063,7 +1063,7 @@ def main():
                 print("\nCouldn't get image dimensions for notes.")
 
     # Add repo link comment if not already present
-    if calibration_valid(calibration):
+    if calibration_valid(calibration) and not args.no_comment:
         add_repo_comment(flickr, photo_id, dry_run=args.dry_run)
 
     if args.dry_run:
