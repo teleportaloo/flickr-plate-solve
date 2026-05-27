@@ -993,16 +993,16 @@ def main():
     photo_info = flickr.oauth.call_method('flickr.photos.getInfo', photo_id=photo_id)
     owner = photo_info.find('.//owner')
     editability = photo_info.find('.//editability')
-    can_comment = editability is not None and editability.get('cancomment') == '1'
-    can_addmeta = editability is not None and editability.get('canaddmeta') == '1'
+    can_comment = editability is None or editability.get('cancomment') == '1'
+    can_addmeta = editability is None or editability.get('canaddmeta') == '1'
     owner_name = owner.get('username', 'unknown') if owner is not None else 'unknown'
 
     if not can_addmeta:
-        print(f"Note: photo owned by {owner_name} — tags and notes not permitted.")
+        print(f"Note: {owner_name} has not enabled tags and notes on this photo.")
         args.no_tag = True
         args.no_note = True
     if not can_comment:
-        print(f"Note: comments not permitted on this photo.")
+        print(f"Note: {owner_name} has not enabled comments on this photo.")
         args.no_comment = True
 
     if args.redo and not args.job:
