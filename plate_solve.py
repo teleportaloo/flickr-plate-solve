@@ -373,10 +373,16 @@ def add_tags(flickr, photo_id, tags, dry_run=False):
 
     print(f"\nAdding {len(tags)} machine tags...")
     for t in tags:
-        flickr.oauth.call_method_post('flickr.photos.addTags',
-                                      photo_id=photo_id,
-                                      tags=t)
-        print(f"  + {t}")
+        try:
+            flickr.oauth.call_method_post('flickr.photos.addTags',
+                                          photo_id=photo_id,
+                                          tags=t)
+            print(f"  + {t}")
+        except Exception as e:
+            if "insufficient permissions" in str(e).lower() or "not found" in str(e).lower():
+                print(f"  Skipping tags — not your photo.")
+                return
+            raise
     print("Tags added.")
 
 
@@ -388,10 +394,16 @@ def add_comment(flickr, photo_id, comment_text, dry_run=False):
         return
 
     print("Adding comment...")
-    flickr.oauth.call_method_post('flickr.photos.comments.addComment',
-                                  photo_id=photo_id,
-                                  comment_text=comment_text)
-    print("Comment added.")
+    try:
+        flickr.oauth.call_method_post('flickr.photos.comments.addComment',
+                                      photo_id=photo_id,
+                                      comment_text=comment_text)
+        print("Comment added.")
+    except Exception as e:
+        if "insufficient permissions" in str(e).lower() or "not found" in str(e).lower():
+            print("  Skipping comment — not your photo.")
+        else:
+            raise
 
 
 # --- SIMBAD name resolution ---
@@ -638,10 +650,16 @@ def add_repo_comment(flickr, photo_id, dry_run=False):
         print(f"[DRY RUN] Would add repo comment")
         return
 
-    flickr.oauth.call_method_post('flickr.photos.comments.addComment',
-                                   photo_id=photo_id,
-                                   comment_text=REPO_COMMENT)
-    print("Added repo link comment.")
+    try:
+        flickr.oauth.call_method_post('flickr.photos.comments.addComment',
+                                       photo_id=photo_id,
+                                       comment_text=REPO_COMMENT)
+        print("Added repo link comment.")
+    except Exception as e:
+        if "insufficient permissions" in str(e).lower() or "not found" in str(e).lower():
+            print("  Skipping repo comment — not your photo.")
+        else:
+            raise
 
 
 def get_image_dimensions(flickr, photo_id):
