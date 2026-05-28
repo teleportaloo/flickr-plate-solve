@@ -18,14 +18,20 @@ Usage:
     python3 plate_solve.py --job 15931178 https://flic.kr/p/2seqonc
     python3 plate_solve.py --clear-notes --job 15931178 https://flic.kr/p/2seqonc
     python3 plate_solve.py --redo https://flic.kr/p/2seqonc
+    python3 plate_solve.py --local https://flic.kr/p/2seqonc
+    python3 plate_solve.py --remote https://flic.kr/p/2seqonc
 
 Requires:
     - Flickr API keys with write permission
       (get one at https://www.flickr.com/services/apps/create/apply/)
-    - Astrometry.net API key
+    - For local solving: astrometry.net solve-field (brew install astrometry-net)
+      with index files in the default data directory
+    - For remote solving: astrometry.net API key
       (get one free at https://nova.astrometry.net — My Profile → API Key)
     - Keys in ./keys.json, ~/.config/plate-solve/keys.json, or env vars
       (see keys.json.example for format)
+    - If solve-field is found locally, it is used by default (instant, no queue).
+      Use --remote to force the cloud service.
 """
 
 import sys
@@ -33,6 +39,9 @@ import os
 import re
 import json
 import time
+import shutil
+import subprocess
+import tempfile
 import argparse
 import urllib.request
 import urllib.parse
@@ -176,6 +185,193 @@ def astrometry_get(endpoint):
     url = f"{ASTROMETRY_BASE}/{endpoint}"
     resp = urllib.request.urlopen(url, timeout=30)
     return json.loads(resp.read())
+
+
+def find_solve_field():
+    """Find solve-field binary. Returns path or None."""
+    # Check PATH first
+    path = shutil.which("solve-field")
+    if path:
+        return path
+    # Common Homebrew locations
+    for candidate in [
+        "/opt/homebrew/bin/solve-field",
+        "/usr/local/bin/solve-field",
+    ]:
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+def plate_solve_local(image_url, solve_field_path):
+    """Plate-solve using local astrometry.net (solve-field).
+
+    Downloads the image, runs solve-field, parses WCS results.
+    Returns (job_id, calibration, info) matching the remote API format.
+    job_id is "local" for local solves.
+    """
+    tmpdir = tempfile.mkdtemp(prefix="plate_solve_")
+    try:
+        # Download image
+        img_path = os.path.join(tmpdir, "image.jpg")
+        print(f"Downloading image...")
+        urllib.request.urlretrieve(image_url, img_path)
+
+        # Run solve-field with generous CPU time — the whole point of
+        # local solving is we're not waiting in a queue, so let it
+        # work through the index files thoroughly.
+        print("Running local plate solve...")
+        cmd = [
+            solve_field_path,
+            "--overwrite",
+            "--no-plots",
+            "--downsample", "2",
+            "--cpulimit", "600",
+            img_path,
+        ]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True,
+                                    timeout=660)
+        except subprocess.TimeoutExpired:
+            print("solve-field timed out", file=sys.stderr)
+            return "local", {}, {"objects_in_field": []}
+
+        wcs_file = os.path.join(tmpdir, "image.wcs")
+        if result.returncode != 0 or not os.path.exists(wcs_file):
+            print("solve-field could not solve this image.", file=sys.stderr)
+            if result.stderr:
+                for line in result.stderr.strip().split('\n')[-5:]:
+                    print(f"  {line}", file=sys.stderr)
+            return "local", {}, {"objects_in_field": []}
+
+        print("Solved!")
+
+        # Parse calibration from solve-field stdout
+        calibration = _parse_solve_field_output(result.stdout)
+
+        # Get objects in field using plot-constellations
+        display_names, annotations = _get_objects_from_wcs(
+            wcs_file, solve_field_path, calibration)
+
+        info = {
+            "objects_in_field": display_names,
+            "annotations": annotations,
+        }
+        return "local", calibration, info
+
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _parse_solve_field_output(stdout):
+    """Parse solve-field stdout for calibration data."""
+    cal = {}
+    for line in stdout.split('\n'):
+        if 'Field center: (RA,Dec) =' in line:
+            # Field center: (RA,Dec) = (83.633, 22.014) deg.
+            m = re.search(r'\(([0-9.+-]+),\s*([0-9.+-]+)\)\s*deg', line)
+            if m:
+                cal['ra'] = float(m.group(1))
+                cal['dec'] = float(m.group(2))
+        elif 'Field size:' in line:
+            # Field size: 1.23 x 0.82 degrees
+            # or: Field size: 73.8 x 49.2 arcminutes
+            m = re.search(r'Field size:\s*([0-9.]+)\s*x\s*([0-9.]+)\s*(deg|arcmin)', line)
+            if m:
+                w = float(m.group(1))
+                h = float(m.group(2))
+                unit = m.group(3)
+                if unit == 'arcmin':
+                    w /= 60.0
+                    h /= 60.0
+                cal['radius'] = ((w**2 + h**2) ** 0.5) / 2.0
+        elif 'pixel scale' in line.lower():
+            # Field rotation angle: up is 123.45 degrees E of N
+            # pixel scale 1.23 arcsec/pix
+            m = re.search(r'pixel scale\s+([0-9.]+)\s*arcsec', line)
+            if m:
+                cal['pixscale'] = float(m.group(1))
+        elif 'Field rotation angle' in line:
+            # Field rotation angle: up is 123.45 degrees E of N
+            m = re.search(r'up is\s+([0-9.+-]+)\s*degrees', line)
+            if m:
+                cal['orientation'] = float(m.group(1))
+    return cal
+
+
+def _get_objects_from_wcs(wcs_file, solve_field_path, calibration):
+    """Identify well-known objects in the solved field.
+
+    Uses plot-constellations (part of the astrometry.net suite) to
+    find NGC/IC/Messier objects and named bright stars.  Returns
+    (display_names, annotations) where display_names is a list of
+    strings for tags/comments and annotations is the raw list of
+    dicts (with pixelx, pixely, radius, names, type) for notes.
+    """
+    empty = ([], [])
+
+    # plot-constellations lives alongside solve-field
+    bin_dir = os.path.dirname(solve_field_path)
+    pc_path = os.path.join(bin_dir, "plot-constellations")
+    if not os.path.exists(pc_path):
+        pc_path = shutil.which("plot-constellations")
+    if not pc_path:
+        print("  (plot-constellations not found, skipping object list)")
+        return empty
+
+    cmd = [
+        pc_path,
+        "-w", wcs_file,
+        "-L",           # list only, no image output
+        "-N",           # NGC/IC/Messier objects
+        "-B",           # bright stars
+        "-c",           # only named bright stars
+        "-j",           # use common names only for stars
+        "-J",           # JSON to stderr
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+    except subprocess.TimeoutExpired:
+        print("  (plot-constellations timed out)")
+        return empty
+
+    if result.returncode != 0:
+        print(f"  (plot-constellations failed: exit {result.returncode})")
+        return empty
+
+    # Parse JSON from stderr (-J flag)
+    try:
+        data = json.loads(result.stderr)
+    except (json.JSONDecodeError, ValueError):
+        names = [line.strip() for line in result.stdout.splitlines()
+                 if line.strip()]
+        return names, []
+
+    annotations = data.get("annotations", [])
+    display_names = []
+    for ann in annotations:
+        names = ann.get("names", [])
+        if not names:
+            continue
+
+        if ann.get("type") == "ngc":
+            # Prefer Messier number, then common name, then NGC/IC
+            messier = next((n for n in names if n.startswith("M ")), None)
+            common = next((n for n in names
+                           if not n.startswith(("NGC", "IC", "M "))), None)
+            catalog = names[0]  # NGC or IC number
+            if messier and common:
+                display_names.append(f"{messier} ({common})")
+            elif messier:
+                display_names.append(messier)
+            elif common:
+                display_names.append(f"{catalog} ({common})")
+            else:
+                display_names.append(catalog)
+        elif ann.get("type") == "star":
+            display_names.append(names[0])
+
+    return display_names, annotations
 
 
 def plate_solve(image_url, api_key, photo_arg="PHOTO"):
@@ -343,7 +539,10 @@ def build_comment(photo_id, calibration, info, job_id):
         ra = dec = pixscale = orientation = radius = 0.0
 
     lines = []
-    lines.append("Plate Solve by astrometry.net")
+    if job_id == "local":
+        lines.append("Plate Solve by astrometry.net (local)")
+    else:
+        lines.append("Plate Solve by astrometry.net")
     lines.append("")
     lines.append(f"Center (RA): {ra_to_hms(ra)}  ({ra:.4f} deg)")
     lines.append(f"Center (Dec): {dec_to_dms(dec)}  ({dec:.4f} deg)")
@@ -357,8 +556,9 @@ def build_comment(photo_id, calibration, info, job_id):
         for obj in objects:
             lines.append(f"  - {obj}")
 
-    lines.append("")
-    lines.append(f"Annotated: https://nova.astrometry.net/annotated_display/{job_id}")
+    if job_id != "local":
+        lines.append("")
+        lines.append(f"Annotated: https://nova.astrometry.net/annotated_display/{job_id}")
 
     return "\n".join(lines)
 
@@ -829,16 +1029,24 @@ def _annotation_priority(annotation):
     return 5
 
 
-def add_notes(flickr, photo_id, job_id, orig_w, orig_h, medium_w, medium_h, dry_run=False):
-    """Add Flickr photo notes from astrometry.net annotations.
+def add_notes(flickr, photo_id, job_id, orig_w, orig_h, medium_w, medium_h,
+              local_annotations=None, dry_run=False):
+    """Add Flickr photo notes from annotations.
 
     Flickr notes use pixel coordinates based on the 500px Medium size.
-    We scale from the original image coordinates (used by astrometry.net)
-    to Medium size. When there are more than MAX_NOTES annotations,
-    prioritises deep-sky objects and named stars over catalogue entries.
+    We scale from the original image coordinates (used by astrometry.net
+    or plot-constellations) to Medium size. When there are more than
+    MAX_NOTES annotations, prioritises deep-sky objects and named stars
+    over catalogue entries.
+
+    For remote solves, fetches annotations from the astrometry.net API.
+    For local solves, pass annotations via local_annotations.
     """
-    annotations = astrometry_get(f"jobs/{job_id}/annotations/")
-    objects = annotations.get("annotations", [])
+    if local_annotations is not None:
+        objects = local_annotations
+    else:
+        annotations = astrometry_get(f"jobs/{job_id}/annotations/")
+        objects = annotations.get("annotations", [])
 
     if len(objects) <= MAX_NOTES:
         # Few enough to keep them all
@@ -1041,6 +1249,10 @@ def main():
     parser.add_argument('--redo', action='store_true',
                         help='Re-do notes only: read job from existing comment, '
                              'clear old notes, skip comment and tags')
+    parser.add_argument('--local', action='store_true',
+                        help='Force local plate solving (requires solve-field)')
+    parser.add_argument('--remote', action='store_true',
+                        help='Force remote solving via nova.astrometry.net')
     args = parser.parse_args()
 
     if args.redo:
@@ -1088,8 +1300,24 @@ def main():
         image_url, label, w, h = get_direct_url(flickr, photo_id)
         print(f"Flickr photo {photo_id}: {label} ({w}x{h})")
         print(f"Direct URL: {image_url}")
-        api_key = load_astrometry_key()
-        job_id, calibration, info = plate_solve(image_url, api_key, photo_arg=args.photo)
+
+        # Decide local vs remote solving
+        solve_field_path = find_solve_field() if not args.remote else None
+        use_local = args.local or (solve_field_path and not args.remote)
+
+        if use_local:
+            if not solve_field_path:
+                solve_field_path = find_solve_field()
+            if not solve_field_path:
+                print("solve-field not found. Install with: brew install astrometry-net",
+                      file=sys.stderr)
+                sys.exit(1)
+            print(f"Using local solver: {solve_field_path}")
+            job_id, calibration, info = plate_solve_local(image_url, solve_field_path)
+        else:
+            print("Using remote solver: nova.astrometry.net")
+            api_key = load_astrometry_key()
+            job_id, calibration, info = plate_solve(image_url, api_key, photo_arg=args.photo)
 
     print_results(job_id, calibration, info)
 
@@ -1118,9 +1346,11 @@ def main():
         if not args.no_note:
             original, medium = get_image_dimensions(flickr, photo_id)
             if original and medium:
+                local_ann = info.get("annotations") if job_id == "local" else None
                 add_notes(flickr, photo_id, job_id,
                           original[0], original[1],
                           medium[0], medium[1],
+                          local_annotations=local_ann,
                           dry_run=args.dry_run)
             else:
                 print("\nCouldn't get image dimensions for notes.")
