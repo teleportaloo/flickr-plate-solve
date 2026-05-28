@@ -42,7 +42,7 @@ For instant results without queuing, install astrometry.net's `solve-field` loca
 brew install astrometry-net
 
 # Debian/Ubuntu
-sudo apt install astrometry.net astrometry-data-4208-4219
+sudo apt install astrometry.net astrometry-data-2mass-08-19
 ```
 
 You also need index files covering your typical field of view. The 4200-series (4208–4219) covers roughly 2 arcmin to 2 degrees, which suits most amateur astrophotography. On macOS with Homebrew, download them into the data directory:
