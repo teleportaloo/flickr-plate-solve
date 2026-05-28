@@ -250,11 +250,12 @@ def plate_solve_local(image_url, solve_field_path):
         calibration = _parse_solve_field_output(result.stdout)
 
         # Get objects in field using plot-constellations
-        display_names, annotations = _get_objects_from_wcs(
+        tag_names, display_names, annotations = _get_objects_from_wcs(
             wcs_file, solve_field_path, calibration)
 
         info = {
-            "objects_in_field": display_names,
+            "objects_in_field": tag_names,
+            "objects_display": display_names,
             "annotations": annotations,
         }
         return "local", calibration, info
@@ -345,10 +346,11 @@ def _get_objects_from_wcs(wcs_file, solve_field_path, calibration):
     except (json.JSONDecodeError, ValueError):
         names = [line.strip() for line in result.stdout.splitlines()
                  if line.strip()]
-        return names, []
+        return names, names, []
 
     annotations = data.get("annotations", [])
-    display_names = []
+    tag_names = []      # bare catalog IDs for machine tags
+    display_names = []  # pretty names for comments
     for ann in annotations:
         names = ann.get("names", [])
         if not names:
@@ -360,18 +362,19 @@ def _get_objects_from_wcs(wcs_file, solve_field_path, calibration):
             common = next((n for n in names
                            if not n.startswith(("NGC", "IC", "M "))), None)
             catalog = names[0]  # NGC or IC number
-            if messier and common:
-                display_names.append(f"{messier} ({common})")
-            elif messier:
-                display_names.append(messier)
-            elif common:
-                display_names.append(f"{catalog} ({common})")
+            # Tag: bare catalog ID (Messier preferred)
+            tag_names.append(messier or catalog)
+            # Display: catalog + common name
+            best = messier or catalog
+            if common:
+                display_names.append(f"{best} ({common})")
             else:
-                display_names.append(catalog)
+                display_names.append(best)
         elif ann.get("type") == "star":
+            tag_names.append(names[0])
             display_names.append(names[0])
 
-    return display_names, annotations
+    return tag_names, display_names, annotations
 
 
 def plate_solve(image_url, api_key, photo_arg="PHOTO"):
@@ -526,7 +529,8 @@ def build_comment(photo_id, calibration, info, job_id):
     pixscale = calibration.get('pixscale', 0)
     orientation = calibration.get('orientation', 0)
     radius = calibration.get('radius', 0)
-    objects = info.get("objects_in_field", [])
+    # Use display names (with common names) for comments when available
+    objects = info.get("objects_display") or info.get("objects_in_field", [])
 
     # Ensure numeric types for formatting
     try:
