@@ -50,7 +50,7 @@ You also need index files covering your typical field of view. The 4200-series (
 ```bash
 DATA_DIR="$(brew --prefix astrometry-net)/data"
 for i in $(seq 4208 4219); do
-    wget -P "$DATA_DIR" "https://portal.nersc.gov/project/cosmo/temp/dstn/index-4200/index-${i}.fits"
+    curl -o "$DATA_DIR/index-${i}.fits" "https://data.astrometry.net/4200/index-${i}.fits"
 done
 ```
 
