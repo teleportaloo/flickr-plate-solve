@@ -221,6 +221,7 @@ def plate_solve_local(image_url, solve_field_path):
         # local solving is we're not waiting in a queue, so let it
         # work through the index files thoroughly.
         print("Running local plate solve...")
+        t0 = time.time()
         cmd = [
             solve_field_path,
             "--overwrite",
@@ -233,18 +234,21 @@ def plate_solve_local(image_url, solve_field_path):
             result = subprocess.run(cmd, capture_output=True, text=True,
                                     timeout=3660)
         except subprocess.TimeoutExpired:
-            print("solve-field timed out", file=sys.stderr)
+            elapsed = time.time() - t0
+            print(f"solve-field timed out after {elapsed:.0f}s", file=sys.stderr)
             return "local", {}, {"objects_in_field": []}
 
+        elapsed = time.time() - t0
         wcs_file = os.path.join(tmpdir, "image.wcs")
         if result.returncode != 0 or not os.path.exists(wcs_file):
-            print("solve-field could not solve this image.", file=sys.stderr)
+            print(f"solve-field could not solve this image ({elapsed:.1f}s).",
+                  file=sys.stderr)
             if result.stderr:
                 for line in result.stderr.strip().split('\n')[-5:]:
                     print(f"  {line}", file=sys.stderr)
             return "local", {}, {"objects_in_field": []}
 
-        print("Solved!")
+        print(f"Solved in {elapsed:.1f}s")
 
         # Parse calibration from solve-field stdout
         calibration = _parse_solve_field_output(result.stdout)
