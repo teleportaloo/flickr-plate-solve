@@ -329,9 +329,9 @@ def _get_objects_from_wcs(wcs_file, solve_field_path, calibration):
         "-w", wcs_file,
         "-L",           # list only, no image output
         "-N",           # NGC/IC/Messier objects
-        "-B",           # bright stars
-        "-c",           # only named bright stars
-        "-j",           # use common names only for stars
+        "-C",           # constellations
+        "-B",           # bright stars (including Bayer/Flamsteed)
+        "-j",           # use common names for stars that have them
         "-J",           # JSON to stderr
     ]
     try:
@@ -375,8 +375,15 @@ def _get_objects_from_wcs(wcs_file, solve_field_path, calibration):
             else:
                 display_names.append(best)
         elif ann.get("type") == "star":
-            tag_names.append(names[0])
+            # names[0] is the common name (if -j flag used) or
+            # "common / Bayer / Flamsteed".  Use just the first
+            # name for tags, full string for display.
+            primary = names[0].split(" / ")[0].strip()
+            tag_names.append(primary)
             display_names.append(names[0])
+        elif ann.get("type") == "constellation":
+            # Constellations go in display only, not tags
+            display_names.append(ann.get("name", names[0]))
 
     return tag_names, display_names, annotations
 
@@ -1081,7 +1088,10 @@ def add_notes(flickr, photo_id, job_id, orig_w, orig_h, medium_w, medium_h,
         print("  Looking up object names via SIMBAD...")
         for a in filtered:
             if a.get("names"):
-                info = simbad_lookup(a["names"][0])
+                # Local annotations may have "Name / Bayer / Flamsteed"
+                # in names[0] — use just the first part for SIMBAD lookup
+                lookup_name = a["names"][0].split(" / ")[0].strip()
+                info = simbad_lookup(lookup_name)
                 for name in info['names']:
                     if name not in a["names"]:
                         a["names"].append(name)
