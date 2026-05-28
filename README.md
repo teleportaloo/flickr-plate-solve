@@ -2,14 +2,16 @@
 
 Plate-solve Flickr astrophotography images using [astrometry.net](https://nova.astrometry.net) and annotate them with machine tags, comments, and hover-over notes identifying stars and deep-sky objects.
 
+Supports **local solving** (instant, via `solve-field`) and **remote solving** (queued, via the nova.astrometry.net cloud service). If `solve-field` is installed locally, it is used by default.
+
 ## What it does
 
 1. Takes a Flickr photo URL (or short link, guest pass URL, or bare photo ID)
-2. Submits the image to astrometry.net for plate solving
+2. Plate-solves the image (locally or via astrometry.net)
 3. Posts results back to Flickr as:
    - **Machine tags** — `astrometry:ra`, `astrometry:dec`, `astrometry:orientation`, etc.
-   - **Comment** — human-readable calibration summary
-   - **Notes** — hover-over annotations on the image identifying stars and deep-sky objects (with SIMBAD name resolution)
+   - **Comment** — human-readable calibration summary with identified objects
+   - **Notes** — hover-over annotations on the image identifying stars and deep-sky objects (with SIMBAD lookups for magnitudes, distances, and object types)
 
 ## Installation
 
@@ -31,15 +33,38 @@ cd flickr-plate-solve
 pip install -e .
 ```
 
+## Local solving (recommended)
+
+For instant results without queuing, install astrometry.net's `solve-field` locally:
+
+```bash
+# macOS (Homebrew)
+brew install astrometry-net
+
+# Debian/Ubuntu
+sudo apt install astrometry.net astrometry-data-4208-4219
+```
+
+You also need index files covering your typical field of view. The 4200-series (4208–4219) covers roughly 2 arcmin to 2 degrees, which suits most amateur astrophotography. On macOS with Homebrew, download them into the data directory:
+
+```bash
+DATA_DIR="$(brew --prefix astrometry-net)/data"
+for i in $(seq 4208 4219); do
+    wget -P "$DATA_DIR" "https://portal.nersc.gov/project/cosmo/temp/dstn/index-4200/index-${i}.fits"
+done
+```
+
+When `solve-field` is found in your PATH (or common Homebrew locations), it is used automatically. Use `--remote` to force the cloud service instead.
+
 ## API keys
 
-You need three keys:
+You need Flickr API keys for all modes. An astrometry.net API key is only needed for remote solving.
 
-| Key | Where to get it |
-|-----|----------------|
-| Flickr API Key | [flickr.com/services/apps/create/apply](https://www.flickr.com/services/apps/create/apply/) |
-| Flickr API Secret | Same page as above |
-| Astrometry.net API Key | [nova.astrometry.net](https://nova.astrometry.net) — My Profile → API Key (free) |
+| Key | Where to get it | Required for |
+|-----|----------------|--------------|
+| Flickr API Key | [flickr.com/services/apps/create/apply](https://www.flickr.com/services/apps/create/apply/) | All modes |
+| Flickr API Secret | Same page as above | All modes |
+| Astrometry.net API Key | [nova.astrometry.net](https://nova.astrometry.net) — My Profile → API Key (free) | Remote solving only |
 
 ### Key configuration
 
@@ -87,6 +112,10 @@ python3 plate_solve.py --job 15931178 https://flic.kr/p/2seqonc
 # Dry run — solve but don't write anything to Flickr
 python3 plate_solve.py --dry-run https://flic.kr/p/2seqonc
 
+# Force local or remote solving
+python3 plate_solve.py --local https://flic.kr/p/2seqonc
+python3 plate_solve.py --remote https://flic.kr/p/2seqonc
+
 # Skip specific outputs
 python3 plate_solve.py --no-comment https://flic.kr/p/2seqonc
 python3 plate_solve.py --no-tag https://flic.kr/p/2seqonc
@@ -117,7 +146,7 @@ python3 solve_album.py --dry-run 72177720326735849
 python3 solve_album.py --force 72177720326735849
 ```
 
-Each solve can take up to 30 minutes, so expect this to run for a while! Photos tagged `astrometry:status=solved` or `astrometry:status=failed` are skipped unless `--force` is used.
+With local solving each photo takes seconds; with remote solving each can take up to 30 minutes in the queue. Photos tagged `astrometry:status=solved` or `astrometry:status=failed` are skipped unless `--force` is used.
 
 ### retag_album.py — re-tag already-solved photos
 
@@ -133,29 +162,42 @@ python3 retag_album.py --dry-run 72177720326735849
 
 ## How it works
 
-- The script fetches the original image URL from the Flickr API and submits it to astrometry.net
-- Astrometry.net identifies star patterns and determines the sky coordinates (plate solving)
-- The script retrieves calibration data (RA, Dec, orientation, field size, pixel scale) and annotations (identified objects)
+### Local solving (default when solve-field is installed)
+
+- Fetches the original image URL from the Flickr API
+- Downloads the image and runs `solve-field` locally (with 10 minutes CPU time limit)
+- `plot-constellations` identifies NGC/IC/Messier objects and named stars in the solved field
+- Each object is looked up in [SIMBAD](https://simbad.cds.unistra.fr/) for common names, magnitudes, distances, and object types
+- Results are posted back to Flickr as machine tags, a comment, and hover-over notes
+
+### Remote solving (fallback, or with --remote)
+
+- Submits the image URL to nova.astrometry.net for cloud-based plate solving
+- Waits for the solve to complete (can take up to 30 minutes in the queue)
+- Retrieves calibration data and annotations from the astrometry.net API
 - Each annotation is looked up in SIMBAD for common names
-- Results are posted back to the Flickr photo as machine tags, a comment, and hover-over notes
-- Annotations are prioritized: deep-sky objects first, then named stars, Bayer designations, Flamsteed numbers, and catalogue entries
+- Results are posted back to Flickr
+
+### Common to both
+
+- Annotations are prioritised: deep-sky objects first, then named stars, Bayer designations, Flamsteed numbers, and catalogue entries
 - Flickr limits photos to 100 notes — the script automatically filters to the most interesting objects if needed
 
 ## Features
 
+- **Local and remote solving** — instant local solves via `solve-field`, with automatic fallback to nova.astrometry.net
 - Supports Flickr URLs, short links (`flic.kr`), guest pass URLs, and bare photo IDs
-- SIMBAD name resolution for common names, object type, and visual magnitude
-- Notes show e.g. "NGC 3031, M 81, Bode's Galaxy (Galaxy, mag 6.9)"
+- SIMBAD name resolution for common names, object type, visual magnitude, and distance
+- Notes show e.g. "NGC 6205, Hercules Globular Cluster, M 13 (Globular Cluster, mag 5.8, 26.1 kly)"
 - Smart annotation filtering with priority tiers when notes exceed Flickr's 100-note limit
 - Album-level scripts for batch solving and retagging
-- Automatic retry on astrometry.net transient errors
-- 30-minute solve timeout with retry command printed on timeout
 - Tags failed solves with `astrometry:status=failed` so you know not to retry
 - Handles both landscape and portrait images
 
 ## Dependencies
 
 - [flickr-oauth](https://github.com/teleportaloo/flickr-oauth) — Flickr OAuth 1.0a authentication (installed automatically)
+- [astrometry.net](https://github.com/dstndstn/astrometry.net) — local plate solving (`solve-field` and `plot-constellations`). Optional but recommended.
 - Python 3.8+ standard library (no other external dependencies)
 
 ## License
