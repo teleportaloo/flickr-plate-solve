@@ -45,7 +45,7 @@ brew install astrometry-net
 sudo apt install astrometry.net astrometry-data-2mass-08-19
 ```
 
-You also need index files covering your typical field of view. The 4200-series (4208–4219) covers roughly 2 arcmin to 2 degrees, which suits most amateur astrophotography. On macOS with Homebrew, download them into the data directory:
+The Debian package installs both the solver and the index files. On macOS, you need to download the 4200-series index files (4208–4219, covering ~2 arcmin to ~2 degree fields) separately:
 
 ```bash
 DATA_DIR="$(brew --prefix astrometry-net)/data"
