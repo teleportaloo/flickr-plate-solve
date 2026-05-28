@@ -226,12 +226,12 @@ def plate_solve_local(image_url, solve_field_path):
             "--overwrite",
             "--no-plots",
             "--downsample", "2",
-            "--cpulimit", "600",
+            "--cpulimit", "3600",
             img_path,
         ]
         try:
             result = subprocess.run(cmd, capture_output=True, text=True,
-                                    timeout=660)
+                                    timeout=3660)
         except subprocess.TimeoutExpired:
             print("solve-field timed out", file=sys.stderr)
             return "local", {}, {"objects_in_field": []}
