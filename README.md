@@ -54,6 +54,15 @@ for i in $(seq 4208 4219); do
 done
 ```
 
+For annotated images with Henry Draper star labels (`--annotate`), also download the HD catalog:
+
+```bash
+DATA_DIR="$(brew --prefix astrometry-net)/data"
+curl -o "$DATA_DIR/hd.fits" "https://data.astrometry.net/hd.fits"
+```
+
+On Debian/Ubuntu: `curl -o /usr/share/astrometry/hd.fits https://data.astrometry.net/hd.fits`
+
 When `solve-field` is found in your PATH (or common Homebrew locations), it is used automatically. Use `--remote` to force the cloud service instead.
 
 ## API keys
@@ -168,9 +177,10 @@ python3 retag_album.py --dry-run 72177720326735849
 ### Local solving (default when solve-field is installed)
 
 - Fetches the original image URL from the Flickr API
-- Downloads the image and runs `solve-field` locally (with 10 minutes CPU time limit)
-- `plot-constellations` identifies NGC/IC/Messier objects and named stars in the solved field
+- Downloads the image and runs `solve-field` locally (with 1 hour CPU time limit)
+- `plot-constellations` identifies NGC/IC/Messier objects, named stars, and Henry Draper catalog stars in the solved field
 - Each object is looked up in [SIMBAD](https://simbad.cds.unistra.fr/) for common names, magnitudes, distances, and object types
+- With `--annotate`, generates an annotated image overlaying labels and circles on the original photo
 - Results are posted back to Flickr as machine tags, a comment, and hover-over notes
 
 ### Remote solving (fallback, or with --remote)
@@ -189,6 +199,7 @@ python3 retag_album.py --dry-run 72177720326735849
 ## Features
 
 - **Local and remote solving** — instant local solves via `solve-field`, with automatic fallback to nova.astrometry.net
+- **Annotated images** — `--annotate` generates a labeled image with NGC/IC/Messier objects, named stars, HD catalog stars, and constellation lines overlaid on the original photo
 - Supports Flickr URLs, short links (`flic.kr`), guest pass URLs, and bare photo IDs
 - SIMBAD name resolution for common names, object type, visual magnitude, and distance
 - Notes show e.g. "NGC 6205, Hercules Globular Cluster, M 13 (Globular Cluster, mag 5.8, 26.1 kly)"
