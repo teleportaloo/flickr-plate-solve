@@ -116,6 +116,9 @@ python3 plate_solve.py --dry-run https://flic.kr/p/2seqonc
 python3 plate_solve.py --local https://flic.kr/p/2seqonc
 python3 plate_solve.py --remote https://flic.kr/p/2seqonc
 
+# Generate an annotated image with objects and stars labeled (local only)
+python3 plate_solve.py --annotate orion.png https://flic.kr/p/2seqonc
+
 # Skip specific outputs
 python3 plate_solve.py --no-comment https://flic.kr/p/2seqonc
 python3 plate_solve.py --no-tag https://flic.kr/p/2seqonc

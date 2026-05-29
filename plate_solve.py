@@ -20,6 +20,7 @@ Usage:
     python3 plate_solve.py --redo https://flic.kr/p/2seqonc
     python3 plate_solve.py --local https://flic.kr/p/2seqonc
     python3 plate_solve.py --remote https://flic.kr/p/2seqonc
+    python3 plate_solve.py --annotate orion.png https://flic.kr/p/2seqonc
 
 Requires:
     - Flickr API keys with write permission
@@ -203,7 +204,8 @@ def find_solve_field():
     return None
 
 
-def _generate_annotated_image(wcs_file, img_path, solve_field_path, photo_id):
+def _generate_annotated_image(wcs_file, img_path, solve_field_path, photo_id,
+                              out_path=None):
     """Generate an annotated image with object labels and constellation lines.
 
     Uses plot-constellations to overlay NGC/IC/Messier objects, named
@@ -234,7 +236,9 @@ def _generate_annotated_image(wcs_file, img_path, solve_field_path, photo_id):
     else:
         ppm_path = None
 
-    out_path = os.path.abspath(f"annotated_{photo_id}.png")
+    if not out_path:
+        out_path = os.path.abspath(f"annotated_{photo_id}.png")
+    out_path = os.path.abspath(out_path)
     cmd = [pc_path, "-w", wcs_file, "-o", out_path,
            "-N", "-C", "-B", "-j"]
     if ppm_path and os.path.exists(ppm_path):
@@ -256,7 +260,8 @@ def _generate_annotated_image(wcs_file, img_path, solve_field_path, photo_id):
     return out_path if os.path.exists(out_path) else None
 
 
-def plate_solve_local(image_url, solve_field_path, photo_id=None):
+def plate_solve_local(image_url, solve_field_path, photo_id=None,
+                      annotate_path=None):
     """Plate-solve using local astrometry.net (solve-field).
 
     Downloads the image, runs solve-field, parses WCS results.
@@ -310,12 +315,13 @@ def plate_solve_local(image_url, solve_field_path, photo_id=None):
         tag_names, display_names, annotations = _get_objects_from_wcs(
             wcs_file, solve_field_path, calibration)
 
-        # Generate annotated image
+        # Generate annotated image (only if --annotate was given)
         annotated_path = None
-        if photo_id:
+        if annotate_path:
             print("Generating annotated image...")
             annotated_path = _generate_annotated_image(
-                wcs_file, img_path, solve_field_path, photo_id)
+                wcs_file, img_path, solve_field_path, photo_id,
+                annotate_path)
             if annotated_path:
                 print(f"  Saved: {annotated_path}")
 
@@ -1339,6 +1345,8 @@ def main():
                         help='Force local plate solving (requires solve-field)')
     parser.add_argument('--remote', action='store_true',
                         help='Force remote solving via nova.astrometry.net')
+    parser.add_argument('--annotate', metavar='PATH',
+                        help='Save annotated image to PATH (local solves only)')
     args = parser.parse_args()
 
     if args.redo:
@@ -1399,7 +1407,9 @@ def main():
                       file=sys.stderr)
                 sys.exit(1)
             print(f"Using local solver: {solve_field_path}")
-            job_id, calibration, info = plate_solve_local(image_url, solve_field_path, photo_id)
+            job_id, calibration, info = plate_solve_local(
+                image_url, solve_field_path, photo_id,
+                annotate_path=args.annotate)
         else:
             print("Using remote solver: nova.astrometry.net")
             api_key = load_astrometry_key()
