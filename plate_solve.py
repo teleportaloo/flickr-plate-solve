@@ -204,6 +204,42 @@ def find_solve_field():
     return None
 
 
+def _find_hd_catalog(bin_dir):
+    """Find the Henry Draper catalog (hd.fits) for star annotations.
+
+    Parses astrometry.cfg for add_path data directories and looks for
+    hd.fits in each.  Falls back to common install locations.
+    Returns the path if found, or None.
+    """
+    # Look for astrometry.cfg relative to the solve-field binary
+    cfg_candidates = [
+        os.path.join(os.path.dirname(bin_dir), "etc", "astrometry.cfg"),
+        "/etc/astrometry.cfg",
+        "/usr/local/etc/astrometry.cfg",
+    ]
+    data_dirs = []
+    for cfg in cfg_candidates:
+        if os.path.isfile(cfg):
+            with open(cfg) as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("add_path"):
+                        data_dirs.append(line.split(None, 1)[1])
+            break
+
+    # Also try common locations as fallback
+    data_dirs.extend([
+        os.path.join(bin_dir, "..", "data"),
+        "/usr/share/astrometry",
+    ])
+
+    for d in data_dirs:
+        hd = os.path.join(d, "hd.fits")
+        if os.path.isfile(hd):
+            return os.path.realpath(hd)
+    return None
+
+
 def _generate_annotated_image(wcs_file, img_path, solve_field_path, photo_id,
                               out_path=None):
     """Generate an annotated image with object labels and constellation lines.
@@ -224,13 +260,22 @@ def _generate_annotated_image(wcs_file, img_path, solve_field_path, photo_id,
     ppm_path = img_path.rsplit(".", 1)[0] + ".ppm"
     jpegtopnm = shutil.which("jpegtopnm")
     if not jpegtopnm:
-        # Try alongside solve-field (astrometry.net installs an-fitstopnm etc.)
         jpegtopnm = shutil.which("djpeg")  # libjpeg alternative
+    if not jpegtopnm:
+        # Try alongside solve-field (e.g. Homebrew installs netpbm nearby)
+        for name in ("jpegtopnm", "djpeg"):
+            candidate = os.path.join(bin_dir, name)
+            if os.path.isfile(candidate):
+                jpegtopnm = candidate
+                break
     if jpegtopnm:
         try:
             with open(ppm_path, 'wb') as f:
-                subprocess.run([jpegtopnm, img_path], stdout=f,
-                               stderr=subprocess.DEVNULL, timeout=30)
+                r = subprocess.run([jpegtopnm, img_path], stdout=f,
+                                   stderr=subprocess.PIPE, timeout=30)
+            if r.returncode != 0 or not os.path.exists(ppm_path) or \
+               os.path.getsize(ppm_path) == 0:
+                ppm_path = None
         except (subprocess.TimeoutExpired, OSError):
             ppm_path = None
     else:
@@ -240,7 +285,13 @@ def _generate_annotated_image(wcs_file, img_path, solve_field_path, photo_id,
         out_path = os.path.abspath(f"annotated_{photo_id}.png")
     out_path = os.path.abspath(out_path)
     cmd = [pc_path, "-w", wcs_file, "-o", out_path,
-           "-N", "-C", "-B", "-j"]
+           "-N", "-C", "-B", "-j",
+           "-f", "40", "-n", "5"]
+    # Add HD catalog stars if hd.fits is available.
+    # Find it by parsing astrometry.cfg for add_path data directories.
+    hd_path = _find_hd_catalog(bin_dir)
+    if hd_path:
+        cmd.extend(["-D", "-d", hd_path])
     if ppm_path and os.path.exists(ppm_path):
         cmd.extend(["-i", ppm_path])
     else:
@@ -253,7 +304,13 @@ def _generate_annotated_image(wcs_file, img_path, solve_field_path, photo_id,
             return None
 
     try:
-        subprocess.run(cmd, capture_output=True, timeout=30)
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if r.returncode != 0:
+            print(f"  plot-constellations failed (exit {r.returncode})",
+                  file=sys.stderr)
+            if r.stderr:
+                for line in r.stderr.strip().split('\n')[-3:]:
+                    print(f"    {line}", file=sys.stderr)
     except subprocess.TimeoutExpired:
         return None
 
@@ -269,6 +326,12 @@ def plate_solve_local(image_url, solve_field_path, photo_id=None,
     job_id is "local" for local solves.
     """
     tmpdir = tempfile.mkdtemp(prefix="plate_solve_")
+    # Ensure solve-field's directory is on PATH so its helper tools
+    # (image2pnm, plot-constellations, etc.) can be found.
+    bin_dir = os.path.dirname(solve_field_path)
+    env = os.environ.copy()
+    if bin_dir and bin_dir not in env.get("PATH", "").split(os.pathsep):
+        env["PATH"] = bin_dir + os.pathsep + env.get("PATH", "")
     try:
         # Download image
         img_path = os.path.join(tmpdir, "image.jpg")
@@ -290,7 +353,7 @@ def plate_solve_local(image_url, solve_field_path, photo_id=None,
         ]
         try:
             result = subprocess.run(cmd, capture_output=True, text=True,
-                                    timeout=3660)
+                                    timeout=3660, env=env)
         except subprocess.TimeoutExpired:
             elapsed = time.time() - t0
             print(f"solve-field timed out after {elapsed:.0f}s", file=sys.stderr)
