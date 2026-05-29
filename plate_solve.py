@@ -203,7 +203,60 @@ def find_solve_field():
     return None
 
 
-def plate_solve_local(image_url, solve_field_path):
+def _generate_annotated_image(wcs_file, img_path, solve_field_path, photo_id):
+    """Generate an annotated image with object labels and constellation lines.
+
+    Uses plot-constellations to overlay NGC/IC/Messier objects, named
+    stars, and constellation lines on the original image.  Saves the
+    result as annotated_<photo_id>.png in the current directory.
+    Returns the output path, or None on failure.
+    """
+    bin_dir = os.path.dirname(solve_field_path)
+    pc_path = os.path.join(bin_dir, "plot-constellations")
+    if not os.path.exists(pc_path):
+        pc_path = shutil.which("plot-constellations")
+    if not pc_path:
+        return None
+
+    # plot-constellations needs PPM input — convert from JPEG
+    ppm_path = img_path.rsplit(".", 1)[0] + ".ppm"
+    jpegtopnm = shutil.which("jpegtopnm")
+    if not jpegtopnm:
+        # Try alongside solve-field (astrometry.net installs an-fitstopnm etc.)
+        jpegtopnm = shutil.which("djpeg")  # libjpeg alternative
+    if jpegtopnm:
+        try:
+            with open(ppm_path, 'wb') as f:
+                subprocess.run([jpegtopnm, img_path], stdout=f,
+                               stderr=subprocess.DEVNULL, timeout=30)
+        except (subprocess.TimeoutExpired, OSError):
+            ppm_path = None
+    else:
+        ppm_path = None
+
+    out_path = os.path.abspath(f"annotated_{photo_id}.png")
+    cmd = [pc_path, "-w", wcs_file, "-o", out_path,
+           "-N", "-C", "-B", "-j"]
+    if ppm_path and os.path.exists(ppm_path):
+        cmd.extend(["-i", ppm_path])
+    else:
+        # Fall back to blank background with image dimensions
+        try:
+            from PIL import Image
+            with Image.open(img_path) as im:
+                cmd.extend(["-W", str(im.width), "-H", str(im.height)])
+        except Exception:
+            return None
+
+    try:
+        subprocess.run(cmd, capture_output=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        return None
+
+    return out_path if os.path.exists(out_path) else None
+
+
+def plate_solve_local(image_url, solve_field_path, photo_id=None):
     """Plate-solve using local astrometry.net (solve-field).
 
     Downloads the image, runs solve-field, parses WCS results.
@@ -257,10 +310,20 @@ def plate_solve_local(image_url, solve_field_path):
         tag_names, display_names, annotations = _get_objects_from_wcs(
             wcs_file, solve_field_path, calibration)
 
+        # Generate annotated image
+        annotated_path = None
+        if photo_id:
+            print("Generating annotated image...")
+            annotated_path = _generate_annotated_image(
+                wcs_file, img_path, solve_field_path, photo_id)
+            if annotated_path:
+                print(f"  Saved: {annotated_path}")
+
         info = {
             "objects_in_field": tag_names,
             "objects_display": display_names,
             "annotations": annotations,
+            "annotated_image": annotated_path,
         }
         return "local", calibration, info
 
@@ -1240,8 +1303,13 @@ def print_results(job_id, calibration, info):
         for obj in objects:
             print(f"  - {obj}")
 
-    print(f"\nAnnotated image:")
-    print(f"  https://nova.astrometry.net/annotated_display/{job_id}")
+    annotated = info.get("annotated_image")
+    if annotated:
+        print(f"\nAnnotated image:")
+        print(f"  {annotated}")
+    elif job_id != "local":
+        print(f"\nAnnotated image:")
+        print(f"  https://nova.astrometry.net/annotated_display/{job_id}")
 
 
 # --- Main ---
@@ -1331,7 +1399,7 @@ def main():
                       file=sys.stderr)
                 sys.exit(1)
             print(f"Using local solver: {solve_field_path}")
-            job_id, calibration, info = plate_solve_local(image_url, solve_field_path)
+            job_id, calibration, info = plate_solve_local(image_url, solve_field_path, photo_id)
         else:
             print("Using remote solver: nova.astrometry.net")
             api_key = load_astrometry_key()
