@@ -466,6 +466,10 @@ def _get_objects_from_wcs(wcs_file, solve_field_path, calibration):
         "-j",           # use common names for stars that have them
         "-J",           # JSON to stderr
     ]
+    # Add HD catalog stars if available
+    hd_path = _find_hd_catalog(bin_dir)
+    if hd_path:
+        cmd.extend(["-D", "-d", hd_path])
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
     except subprocess.TimeoutExpired:
@@ -488,6 +492,15 @@ def _get_objects_from_wcs(wcs_file, solve_field_path, calibration):
     tag_names = []      # bare catalog IDs for machine tags
     display_names = []  # pretty names for comments
     for ann in annotations:
+        # HD catalog entries use "name" (singular) instead of "names"
+        if ann.get("type") == "hd":
+            hd_name = ann.get("name", "")
+            if hd_name:
+                tag_names.append(hd_name)
+                display_names.append(hd_name)
+                ann["names"] = [hd_name]  # normalise for notes
+            continue
+
         names = ann.get("names", [])
         if not names:
             continue
