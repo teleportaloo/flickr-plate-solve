@@ -46,6 +46,7 @@ import tempfile
 import argparse
 import urllib.request
 import urllib.parse
+import urllib.error
 
 from flickr_oauth import FlickrAPI
 
@@ -186,6 +187,33 @@ def astrometry_get(endpoint):
     url = f"{ASTROMETRY_BASE}/{endpoint}"
     resp = urllib.request.urlopen(url, timeout=30)
     return json.loads(resp.read())
+
+
+def download_image(url, path, retries=5):
+    """Download url to path, backing off on HTTP 429/503.
+
+    Flickr's image CDN rate-limits bursts of original-size downloads
+    (e.g. solve_album.py running many photos back to back).
+    """
+    req = urllib.request.Request(url, headers={
+        'User-Agent': 'flickr-plate-solve/1.0 (+https://github.com/teleportaloo/flickr-plate-solve)'
+    })
+    delay = 10
+    for attempt in range(retries + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp, \
+                    open(path, 'wb') as f:
+                shutil.copyfileobj(resp, f)
+            return
+        except urllib.error.HTTPError as e:
+            if e.code not in (429, 503) or attempt == retries:
+                raise
+            retry_after = e.headers.get('Retry-After', '')
+            wait = int(retry_after) if retry_after.isdigit() else delay
+            print(f"  HTTP {e.code} from image server, retrying in {wait}s "
+                  f"({attempt + 1}/{retries})...")
+            time.sleep(wait)
+            delay = min(delay * 2, 300)
 
 
 def find_solve_field():
@@ -336,7 +364,7 @@ def plate_solve_local(image_url, solve_field_path, photo_id=None,
         # Download image
         img_path = os.path.join(tmpdir, "image.jpg")
         print(f"Downloading image...")
-        urllib.request.urlretrieve(image_url, img_path)
+        download_image(image_url, img_path)
 
         # Run solve-field with generous CPU time — the whole point of
         # local solving is we're not waiting in a queue, so let it
